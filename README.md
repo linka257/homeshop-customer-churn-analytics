@@ -1,6 +1,6 @@
 # End-to-End Customer Churn Analytics: Power BI & R
 
-**Author:** Linka Ndizeye ([GitHub](https://github.com/linka257/) | [LinkedIn](https://linkedin.com/linkandizeye/))  
+**Author:** Linka Ndizeye ([GitHub](https://github.com/linka257/) | [LinkedIn](https://linkedin.com/in/linkandizeye/)  
 **Tech Stack:** Power BI, R (`caret`, `pROC`, `car`, `ranger`, `tidyverse`), Logistic Regression & Random Forest  
 
 ---
