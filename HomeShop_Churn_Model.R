@@ -2,7 +2,7 @@
 # Project: Customer Churn Prediction & Retention Analytics at HomeShop
 # Author:  Linka Ndizeye (https://github.com/linka257)
 # Tools:   R (caret, pROC, car, ranger, tidyverse) | Paired with Power BI
-# Dataset: 24,017 retail customer records across Swiss regions
+# Dataset: Homeshop_clean.csv (24,017 retail customer records across Swiss regions)
 # ==============================================================================
 
 library(caret)
@@ -13,11 +13,11 @@ library(tidyverse)
 
 set.seed(123)
 
-# 1. Load Data (with Synthetic Fallback for Reproducibility) -------------------
-if (file.exists("Homeshop.csv")) {
-  Homeshop <- read_csv("Homeshop.csv", show_col_types = FALSE)
+# 1. Load Data (Homeshop_clean.csv with Synthetic Fallback) ---------------------
+if (file.exists("Homeshop_clean.csv")) {
+  Homeshop <- read_csv("Homeshop_clean.csv", show_col_types = FALSE)
 } else {
-  message("Course CSV not found locally. Generating synthetic dataset (n = 24,017) with matching structure...")
+  message("Homeshop_clean.csv not found locally. Generating synthetic dataset (n = 24,017) with matching schema...")
   n <- 24017
   Homeshop <- tibble(
     NumPurchases        = rpois(n, lambda = 6),
@@ -51,10 +51,12 @@ if (file.exists("Homeshop.csv")) {
     select(-lin_pred)
 }
 
-# 2. Feature Engineering & Factor Encoding -------------------------------------
+# 2. Data Cleaning, Feature Engineering & Factor Encoding ----------------------
 Homeshop <- Homeshop %>%
   drop_na() %>%
   mutate(
+    # Ensure integer ticket counts (raw export encoded 0 tickets as 1e-05)
+    SupportInteractions = round(SupportInteractions),
     Churn = factor(Churn, levels = c(0, 1), labels = c("No", "Yes")),
     # Capture the non-linear U-shaped Age pattern observed in Power BI Phase 1
     AgeBand = factor(
@@ -65,7 +67,7 @@ Homeshop <- Homeshop %>%
       ),
       levels = c("Core (30-44)", "Young (<30)", "Mature (45+)")
     ),
-    # Set explicit reference levels so interpretation is unambiguous
+    # Set explicit reference baselines for unambiguous odds-ratio interpretation
     MembershipLevel = relevel(factor(MembershipLevel), ref = "Bronze"),
     Month           = relevel(factor(Month), ref = "Apr"),
     Region          = relevel(factor(Region), ref = "Basel")
@@ -80,8 +82,8 @@ trainData  <- Homeshop[trainIndex, ]
 testData   <- Homeshop[-trainIndex, ]
 
 # 4. Collinearity Diagnostics & Model Specification ----------------------------
-# Note: DiscountRate is excluded because it is deterministically assigned by
-# MembershipLevel (exact linear dependency / singularity in glm).
+# DiscountRate is excluded because it is deterministically assigned by
+# MembershipLevel (0.02, 0.05, 0.10, 0.15 -> exact singularity in glm).
 model_check <- glm(
   Churn ~ NumPurchases + TotalSpending + WebsiteVisits + SupportInteractions +
     MembershipMonths + MembershipLevel + AgeBand + Month + Region + Gender + IncomeGroup,
@@ -92,7 +94,7 @@ model_check <- glm(
 cat("\nVariance Inflation Factors (GVIF):\n")
 print(vif(model_check))
 
-# Refined specification combining behavioral, loyalty, age-band, and temporal/regional controls
+# Final model combining behavioral, loyalty, non-linear age, and temporal/regional controls
 model_formula <- Churn ~ NumPurchases + SupportInteractions + MembershipLevel + AgeBand + Month + Region
 
 # 5. 10-Fold Cross-Validation & Benchmark Comparison ---------------------------
@@ -104,7 +106,7 @@ cv_ctrl <- trainControl(
   savePredictions = "final"
 )
 
-# Model A: Penalized / Standard Logistic Regression
+# Model A: Interpretable Binary Logistic Regression
 cv_glm <- train(
   model_formula,
   data      = trainData,
@@ -114,7 +116,7 @@ cv_glm <- train(
   trControl = cv_ctrl
 )
 
-# Model B: Random Forest Benchmark (ranger)
+# Model B: Non-Linear Random Forest Benchmark (ranger)
 cv_rf <- train(
   model_formula,
   data       = trainData,
@@ -160,15 +162,15 @@ calibration_df <- testData %>%
     observed_rate = round(mean(Churn == "Yes"), 3),
     lift          = round(observed_rate / mean(testData$Churn == "Yes"), 2)
   )
-cat("\nCalibration & Decile Lift Table (Top Decile = Highest Risk):\n")
+cat("\nCalibration & Decile Lift Table (Decile 10 = Highest Risk):\n")
 print(calibration_df)
 
 # 7. Threshold Sweep & Cost-Benefit Optimization -------------------------------
-# Simple retention economics:
-# - Automated email / voucher campaign cost per targeted customer: CHF 5
-# - Net margin value of retaining an at-risk customer: CHF 80 (assuming 25% save rate -> CHF 20 expected value)
+# Illustrative retention economics:
+# - Automated email / voucher outreach cost per targeted customer: CHF 5
+# - Net margin value of retaining an at-risk customer: CHF 80 (25% save rate -> CHF 20 expected gross value)
 cost_contact <- 5
-value_save   <- 80 * 0.25  # CHF 20 expected gross value per true churner reached
+value_save   <- 80 * 0.25
 
 youden_coords <- coords(roc_obj, x = "best", best.method = "youden", ret = c("threshold", "sensitivity", "specificity", "precision"))
 thresholds    <- c(0.50, round(youden_coords$threshold, 3), 0.30, 0.25)
@@ -204,3 +206,6 @@ personas <- data.frame(
 personas$Predicted_Churn_Prob <- round(predict(final_glm, newdata = personas, type = "response"), 3)
 cat("\nSimulated Persona Churn Probabilities:\n")
 print(personas)
+
+# 9. Session Info for Reproducibility ------------------------------------------
+sessionInfo()
